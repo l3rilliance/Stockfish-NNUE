@@ -42,7 +42,7 @@ void on_hash_size(const Option& o) { TT.resize(size_t(o)); }
 void on_logger(const Option& o) { start_logger(o); }
 void on_threads(const Option& o) { Threads.set(size_t(o)); }
 void on_tb_path(const Option& o) { Tablebases::init(o); }
-void on_eval_dir(const Option& o) { load_eval_finished = false; }
+void on_eval_file(const Option&) { load_eval_finished = false; init_nnue(); }
 
 
 /// Our case insensitive less() function as required by UCI protocol
@@ -53,12 +53,11 @@ bool CaseInsensitiveLess::operator() (const string& s1, const string& s2) const 
 }
 
 
-/// init() initializes the UCI options to their hard-coded default values
+/// UCI::init() initializes the UCI options to their hard-coded default values
 
 void init(OptionsMap& o) {
 
-  // at most 2^32 clusters.
-  constexpr int MaxHashMB = Is64Bit ? 131072 : 2048;
+  constexpr int MaxHashMB = Is64Bit ? 33554432 : 2048;
 
   o["Debug Log File"]        << Option("", on_logger);
   o["Contempt"]              << Option(24, -100, 100);
@@ -70,32 +69,33 @@ void init(OptionsMap& o) {
   o["MultiPV"]               << Option(1, 1, 500);
   o["Skill Level"]           << Option(20, 0, 20);
   o["Move Overhead"]         << Option(10, 0, 5000);
-  o["Minimum Thinking Time"] << Option( 0, 0, 5000);
   o["Slow Mover"]            << Option(100, 10, 1000);
   o["nodestime"]             << Option(0, 0, 10000);
   o["UCI_Chess960"]          << Option(false);
   o["UCI_AnalyseMode"]       << Option(false);
   o["UCI_LimitStrength"]     << Option(false);
   o["UCI_Elo"]               << Option(1350, 1350, 2850);
+  o["UCI_ShowWDL"]           << Option(false);
   o["SyzygyPath"]            << Option("<empty>", on_tb_path);
   o["SyzygyProbeDepth"]      << Option(1, 1, 100);
   o["Syzygy50MoveRule"]      << Option(true);
   o["SyzygyProbeLimit"]      << Option(7, 0, 7);
-  // 評価関数フォルダ。これを変更したとき、評価関数を次のisreadyタイミングで読み直す必要がある。
-  o["EvalDir"]               << Option("eval", on_eval_dir);
-  // isreadyタイミングで評価関数を読み込まれると、新しい評価関数の変換のために
-  // test evalconvertコマンドを叩きたいのに、その新しい評価関数がないがために
-  // このコマンドの実行前に異常終了してしまう。
-  // そこでこの隠しオプションでisready時の評価関数の読み込みを抑制して、
-  // test evalconvertコマンドを叩く。
+  // Evaluation function file name. When this is changed, it is necessary to reread the evaluation function at the next ucinewgame timing.
+  // Without the preceding "./", some GUIs can not load the net file.
+  o["EvalFile"]              << Option("./eval/nn.bin", on_eval_file);
+  // When the evaluation function is loaded at the ucinewgame timing, it is necessary to convert the new evaluation function.
+  // I want to hit the test eval convert command, but there is no new evaluation function
+  // It ends abnormally before executing this command.
+  // Therefore, with this hidden option, you can suppress the loading of the evaluation function when ucinewgame,
+  // Hit the test eval convert command.
   o["SkipLoadingEval"]       << Option(false);
-  // 定跡の指し手を何手目まで用いるか
+  // how many moves to use a fixed move
   o["BookMoves"] << Option(16, 0, 10000);
 
 #if defined(EVAL_LEARN)
-  // 評価関数の学習を行なうときは、評価関数の保存先のフォルダを変更できる。
-  // デフォルトではevalsave。このフォルダは事前に用意されているものとする。
-  // このフォルダ配下にフォルダを"0/","1/",…のように自動的に掘り、そこに評価関数ファイルを保存する。
+  // When learning the evaluation function, you can change the folder to save the evaluation function.
+  // Evalsave by default. This folder shall be prepared in advance.
+  // Automatically dig a folder under this folder like "0/", "1/", ... and save the evaluation function file there.
   o["EvalSaveDir"] << Option("evalsave");
 #endif
 }
@@ -206,6 +206,6 @@ Option& Option::operator=(const string& v) {
   return *this;
 }
 
-// 評価関数を読み込んだかのフラグ。これはevaldirの変更にともなってfalseにする。
+// Flag that read the evaluation function. This is set to false when evaldir is changed.
 bool load_eval_finished = false;
 } // namespace UCI

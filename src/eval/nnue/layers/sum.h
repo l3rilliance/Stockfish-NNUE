@@ -1,4 +1,4 @@
-﻿// NNUE評価関数の層Sumの定義
+﻿// Definition of layer Sum of NNUE evaluation function
 
 #ifndef _NNUE_LAYERS_SUM_H_
 #define _NNUE_LAYERS_SUM_H_
@@ -8,162 +8,155 @@
 #include "../nnue_common.h"
 
 namespace Eval {
-  namespace NNUE {
-    namespace Layers {
 
-      // 複数の層の出力の和を取る層
-      template <typename FirstPreviousLayer, typename... RemainingPreviousLayers>
-      class Sum : public Sum<RemainingPreviousLayers...> {
-      private:
-        using Head = FirstPreviousLayer;
-        using Tail = Sum<RemainingPreviousLayers...>;
+namespace NNUE {
 
-      public:
-        // 入出力の型
-        using InputType = typename Head::OutputType;
-        using OutputType = InputType;
+namespace Layers {
 
-        static_assert(std::is_same<InputType, typename Tail::InputType>::value, "");
+// Layer that sums the output of multiple layers
+template <typename FirstPreviousLayer, typename... RemainingPreviousLayers>
+class Sum : public Sum<RemainingPreviousLayers...> {
+ private:
+  using Head = FirstPreviousLayer;
+  using Tail = Sum<RemainingPreviousLayers...>;
 
-        // 入出力の次元数
-        static constexpr IndexType kInputDimensions = Head::kOutputDimensions;
-        static constexpr IndexType kOutputDimensions = kInputDimensions;
+ public:
+  // Input/output type
+  using InputType = typename Head::OutputType;
+  using OutputType = InputType;
+  static_assert(std::is_same<InputType, typename Tail::InputType>::value, "");
 
-        static_assert(kInputDimensions == Tail::kInputDimensions , "");
+  // number of input/output dimensions
+  static constexpr IndexType kInputDimensions = Head::kOutputDimensions;
+  static constexpr IndexType kOutputDimensions = kInputDimensions;
+  static_assert(kInputDimensions == Tail::kInputDimensions ,"");
 
-        // この層で使用する順伝播用バッファのサイズ
-        static constexpr std::size_t kSelfBufferSize =
-            CeilToMultiple(kOutputDimensions * sizeof(OutputType), kCacheLineSize);
+  // Size of forward propagation buffer used in this layer
+  static constexpr std::size_t kSelfBufferSize =
+      CeilToMultiple(kOutputDimensions * sizeof(OutputType), kCacheLineSize);
 
-        // 入力層からこの層までで使用する順伝播用バッファのサイズ
-        static constexpr std::size_t kBufferSize =
-            std::max(Head::kBufferSize + kSelfBufferSize, Tail::kBufferSize);
+  // Size of the forward propagation buffer used from the input layer to this layer
+  static constexpr std::size_t kBufferSize =
+      std::max(Head::kBufferSize + kSelfBufferSize, Tail::kBufferSize);
 
-        // 評価関数ファイルに埋め込むハッシュ値
-        static constexpr std::uint32_t GetHashValue() {
+  // Hash value embedded in the evaluation function file
+  static constexpr std::uint32_t GetHashValue() {
+    std::uint32_t hash_value = 0xBCE400B4u;
+    hash_value ^= Head::GetHashValue() >> 1;
+    hash_value ^= Head::GetHashValue() << 31;
+    hash_value ^= Tail::GetHashValue() >> 2;
+    hash_value ^= Tail::GetHashValue() << 30;
+    return hash_value;
+  }
 
-          std::uint32_t hash_value = 0xBCE400B4u;
-          hash_value ^= Head::GetHashValue() >> 1;
-          hash_value ^= Head::GetHashValue() << 31;
-          hash_value ^= Tail::GetHashValue() >> 2;
-          hash_value ^= Tail::GetHashValue() << 30;
+  // A string that represents the structure from the input layer to this layer
+  static std::string GetStructureString() {
+    return "Sum[" +
+        std::to_string(kOutputDimensions) + "](" + GetSummandsString() + ")";
+  }
 
-          return hash_value;
-        }
+  // read parameters
+  bool ReadParameters(std::istream& stream) {
+    if (!Tail::ReadParameters(stream)) return false;
+    return previous_layer_.ReadParameters(stream);
+  }
 
-        // 入力層からこの層までの構造を表す文字列
-        static std::string GetStructureString() {
-          return "Sum[" + std::to_string(kOutputDimensions) + "](" + GetSummandsString() + ")";
-        }
+  // write parameters
+  bool WriteParameters(std::ostream& stream) const {
+    if (!Tail::WriteParameters(stream)) return false;
+    return previous_layer_.WriteParameters(stream);
+  }
 
-        // パラメータを読み込む
-        bool ReadParameters(std::istream& stream) {
+  // forward propagation
+  const OutputType* Propagate(
+      const TransformedFeatureType* transformed_features, char* buffer) const {
+    Tail::Propagate(transformed_features, buffer);
+    const auto head_output = previous_layer_.Propagate(
+        transformed_features, buffer + kSelfBufferSize);
+    const auto output = reinterpret_cast<OutputType*>(buffer);
+    for (IndexType i = 0; i <kOutputDimensions; ++i) {
+      output[i] += head_output[i];
+    }
+    return output;
+  }
 
-          if (!Tail::ReadParameters(stream))
-              return false;
+ protected:
+  // A string that represents the list of layers to be summed
+  static std::string GetSummandsString() {
+    return Head::GetStructureString() + "," + Tail::GetSummandsString();
+  }
 
-          return previous_layer_.ReadParameters(stream);
-        }
+  // Make the learning class a friend
+  friend class Trainer<Sum>;
 
-        // パラメータを書き込む
-        bool WriteParameters(std::ostream& stream) const {
+  // the layer immediately before this layer
+  FirstPreviousLayer previous_layer_;
+};
 
-          if (!Tail::WriteParameters(stream))
-              return false;
+// Layer that sums the output of multiple layers (when there is one template argument)
+template <typename PreviousLayer>
+class Sum<PreviousLayer> {
+ public:
+  // Input/output type
+  using InputType = typename PreviousLayer::OutputType;
+  using OutputType = InputType;
 
-          return previous_layer_.WriteParameters(stream);
-        }
+  // number of input/output dimensions
+  static constexpr IndexType kInputDimensions =
+      PreviousLayer::kOutputDimensions;
+  static constexpr IndexType kOutputDimensions = kInputDimensions;
 
-        // 順伝播
-        const OutputType* Propagate(const TransformedFeatureType* transformed_features,
-                                    char* buffer) const {
+  // Size of the forward propagation buffer used from the input layer to this layer
+  static constexpr std::size_t kBufferSize = PreviousLayer::kBufferSize;
 
-          Tail::Propagate(transformed_features, buffer);
-          const auto head_output = previous_layer_.Propagate(transformed_features,
-                                                             buffer + kSelfBufferSize);
-          const auto output = reinterpret_cast<OutputType*>(buffer);
+  // Hash value embedded in the evaluation function file
+  static constexpr std::uint32_t GetHashValue() {
+    std::uint32_t hash_value = 0xBCE400B4u;
+    hash_value ^= PreviousLayer::GetHashValue() >> 1;
+    hash_value ^= PreviousLayer::GetHashValue() << 31;
+    return hash_value;
+  }
 
-          for (IndexType i = 0; i < kOutputDimensions; ++i)
-             output[i] += head_output[i];
+  // A string that represents the structure from the input layer to this layer
+  static std::string GetStructureString() {
+    return "Sum[" +
+        std::to_string(kOutputDimensions) + "](" + GetSummandsString() + ")";
+  }
 
-          return output;
-        }
+  // read parameters
+  bool ReadParameters(std::istream& stream) {
+    return previous_layer_.ReadParameters(stream);
+  }
 
-      protected:
-        // 和を取る対象となる層のリストを表す文字列
-        static std::string GetSummandsString() {
-          return Head::GetStructureString() + "," + Tail::GetSummandsString();
-        }
+  // write parameters
+  bool WriteParameters(std::ostream& stream) const {
+    return previous_layer_.WriteParameters(stream);
+  }
 
-        // 学習用クラスをfriendにする
-        friend class Trainer<Sum>;
+  // forward propagation
+  const OutputType* Propagate(
+      const TransformedFeatureType* transformed_features, char* buffer) const {
+    return previous_layer_.Propagate(transformed_features, buffer);
+  }
 
-        // この層の直前の層
-        FirstPreviousLayer previous_layer_;
-      };
+ protected:
+  // A string that represents the list of layers to be summed
+  static std::string GetSummandsString() {
+    return PreviousLayer::GetStructureString();
+  }
 
-      // 複数の層の出力の和を取る層（テンプレート引数が1つの場合）
-      template <typename PreviousLayer>
-      class Sum<PreviousLayer> {
-      public:
-        // 入出力の型
-        using InputType = typename PreviousLayer::OutputType;
-        using OutputType = InputType;
+  // Make the learning class a friend
+  friend class Trainer<Sum>;
 
-        // 入出力の次元数
-        static constexpr IndexType kInputDimensions = PreviousLayer::kOutputDimensions;
-        static constexpr IndexType kOutputDimensions = kInputDimensions;
+  // the layer immediately before this layer
+  PreviousLayer previous_layer_;
+};
 
-        // 入力層からこの層までで使用する順伝播用バッファのサイズ
-        static constexpr std::size_t kBufferSize = PreviousLayer::kBufferSize;
+}  // namespace Layers
 
-        // 評価関数ファイルに埋め込むハッシュ値
-        static constexpr std::uint32_t GetHashValue() {
+}  // namespace NNUE
 
-          std::uint32_t hash_value = 0xBCE400B4u;
-          hash_value ^= PreviousLayer::GetHashValue() >> 1;
-          hash_value ^= PreviousLayer::GetHashValue() << 31;
-
-          return hash_value;
-        }
-
-        // 入力層からこの層までの構造を表す文字列
-        static std::string GetStructureString() {
-          return "Sum[" + std::to_string(kOutputDimensions) + "](" + GetSummandsString() + ")";
-        }
-
-        // パラメータを読み込む
-        bool ReadParameters(std::istream& stream) {
-          return previous_layer_.ReadParameters(stream);
-        }
-
-        // パラメータを書き込む
-        bool WriteParameters(std::ostream& stream) const {
-          return previous_layer_.WriteParameters(stream);
-        }
-
-        // 順伝播
-        const OutputType* Propagate(const TransformedFeatureType* transformed_features,
-                                    char* buffer) const {
-          return previous_layer_.Propagate(transformed_features, buffer);
-        }
-
-      protected:
-        // 和を取る対象となる層のリストを表す文字列
-        static std::string GetSummandsString() {
-          return PreviousLayer::GetStructureString();
-        }
-
-        // 学習用クラスをfriendにする
-        friend class Trainer<Sum>;
-
-        // この層の直前の層
-        PreviousLayer previous_layer_;
-      };
-
-    } // namespace Layers
-  } // namespace NNUE
-} // namespace Eval
+}  // namespace Eval
 
 #endif  // defined(EVAL_NNUE)
 

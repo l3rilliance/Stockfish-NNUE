@@ -19,6 +19,7 @@
 */
 
 #include <cassert>
+#include <cmath>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -44,22 +45,22 @@ extern vector<string> setup_bench(const Position&, istream&);
 // FEN string of the initial position, normal chess
 const char* StartFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
-// 棋譜を自動生成するコマンド
+// Command to automatically generate a game record
 #if defined (EVAL_LEARN)
 namespace Learner
 {
-  // 教師局面の自動生成
+  // Automatic generation of teacher position
   void gen_sfen(Position& pos, istringstream& is);
 
-  // 生成した棋譜からの学習
+  // Learning from the generated game record
   void learn(Position& pos, istringstream& is);
 
 #if defined(GENSFEN2019)
-  // 開発中の教師局面の自動生成コマンド
+  // Automatic generation command of teacher phase under development
   void gen_sfen2019(Position& pos, istringstream& is);
 #endif
 
-  // 読み筋と評価値のペア。Learner::search(),Learner::qsearch()が返す。
+  // A pair of reader and evaluation value. Returned by Learner::search(),Learner::qsearch().
   typedef std::pair<Value, std::vector<Move> > ValueAndPV;
 
   ValueAndPV qsearch(Position& pos);
@@ -71,8 +72,8 @@ namespace Learner
 #if defined(EVAL_NNUE) && defined(ENABLE_TEST_CMD)
 void test_cmd(Position& pos, istringstream& is)
 {
-    // 探索をするかも知れないので初期化しておく。
-    is_ready();
+    // Initialize as it may be searched.
+    init_nnue();
 
     std::string param;
     is >> param;
@@ -208,7 +209,14 @@ namespace {
         }
         else if (token == "setoption")  setoption(is);
         else if (token == "position")   position(pos, is, states);
-        else if (token == "ucinewgame") { Search::clear(); elapsed = now(); } // Search::clear() may take some while
+        else if (token == "ucinewgame")
+        {
+#if defined(EVAL_NNUE)
+            init_nnue();
+#endif
+            Search::clear();
+            elapsed = now(); // Search::clear() may take some while
+        }
     }
 
     elapsed = now() - elapsed + 1; // Ensure positivity to avoid a 'divide by zero'
@@ -221,80 +229,69 @@ namespace {
          << "\nNodes/second    : " << 1000 * nodes / elapsed << endl;
   }
 
-  // check sumを計算したとき、それを保存しておいてあとで次回以降、整合性のチェックを行なう。
-  uint64_t eval_sum;
+  // The win rate model returns the probability (per mille) of winning given an eval
+  // and a game-ply. The model fits rather accurately the LTC fishtest statistics.
+  int win_rate_model(Value v, int ply) {
+
+     // The model captures only up to 240 plies, so limit input (and rescale)
+     double m = std::min(240, ply) / 64.0;
+
+     // Coefficients of a 3rd order polynomial fit based on fishtest data
+     // for two parameters needed to transform eval to the argument of a
+     // logistic function.
+     double as[] = {-8.24404295, 64.23892342, -95.73056462, 153.86478679};
+     double bs[] = {-3.37154371, 28.44489198, -56.67657741,  72.05858751};
+     double a = (((as[0] * m + as[1]) * m + as[2]) * m) + as[3];
+     double b = (((bs[0] * m + bs[1]) * m + bs[2]) * m) + bs[3];
+
+     // Transform eval to centipawns with limited range
+     double x = Utility::clamp(double(100 * v) / PawnValueEg, -1000.0, 1000.0);
+
+     // Return win rate in per mille (rounded to nearest)
+     return int(0.5 + 1000 / (1 + std::exp((a - x) / b)));
+  }
 } // namespace
 
-// is_ready_cmd()を外部から呼び出せるようにしておく。(benchコマンドなどから呼び出したいため)
-// 局面は初期化されないので注意。
-void is_ready(bool skipCorruptCheck)
+// Make is_ready_cmd() callable from outside. (Because I want to call it from the bench command etc.)
+// Note that the phase is not initialized.
+void init_nnue()
 {
 #if defined(EVAL_NNUE)
-  // "isready"を受け取ったあと、"readyok"を返すまで5秒ごとに改行を送るように修正する。(keep alive的な処理)
-  //	USI2.0の仕様より。
-  //  -"isready"のあとのtime out時間は、30秒程度とする。これを超えて、評価関数の初期化、hashテーブルの確保をしたい場合、
-  //  思考エンジン側から定期的に何らかのメッセージ(改行可)を送るべきである。
-  //  -ShogiGUIではすでにそうなっているので、MyShogiもそれに追随する。
-  //  -また、やねうら王のエンジン側は、"isready"を受け取ったあと、"readyok"を返すまで5秒ごとに改行を送るように修正する。
+  // After receiving "isready", modify so that a line feed is sent every 5 seconds until "readyok" is returned. (keep alive processing)
+  // From USI 2.0 specifications.
+  // -The time out time after "is ready" is about 30 seconds. Beyond this, if you want to initialize the evaluation function and secure the hash table,
+  // You should send some kind of message (breakable) from the thinking engine side.
+  // -Shogi GUI already does so, so MyShogi will follow along.
+  //-Also, the engine side of Yaneura King modifies it so that after "isready" is received, a line feed is sent every 5 seconds until "readyok" is returned.
 
-  auto ended = false;
-  auto th = std::thread([&ended] {
-    int count = 0;
-    while (!ended)
-    {
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
-      if (++count >= 50 /* 5秒 */)
-      {
-        count = 0;
-        sync_cout << sync_endl; // 改行を送信する。
-      }
-    }
-    });
-
-  // 評価関数の読み込みなど時間のかかるであろう処理はこのタイミングで行なう。
-  // 起動時に時間のかかる処理をしてしまうと将棋所がタイムアウト判定をして、思考エンジンとしての認識をリタイアしてしまう。
+  // Perform processing that may take time, such as reading the evaluation function, at this timing.
+  // If you do a time-consuming process at startup, Shogi place will make a timeout judgment and retire the recognition as a thinking engine.
   if (!UCI::load_eval_finished)
   {
-    // 評価関数の読み込み
-    Eval::load_eval();
+      // Read evaluation function
+      Eval::load_eval();
 
-    // チェックサムの計算と保存(その後のメモリ破損のチェックのため)
-    eval_sum = Eval::calc_check_sum();
+      // Calculate and save checksum (to check for subsequent memory corruption)
+      eval_sum = Eval::calc_check_sum();
 
-    // ソフト名の表示
-    Eval::print_softname(eval_sum);
+      // display soft name
+      Eval::print_softname(eval_sum);
 
-    UCI::load_eval_finished = true;
-
+      UCI::load_eval_finished = true;
   }
   else
   {
-    // メモリが破壊されていないかを調べるためにチェックサムを毎回調べる。
-    // 時間が少しもったいない気もするが.. 0.1秒ぐらいのことなので良しとする。
-    if (!skipCorruptCheck && eval_sum != Eval::calc_check_sum())
-      sync_cout << "Error! : EVAL memory is corrupted" << sync_endl;
+      // Check the checksum every time to see if the memory has been corrupted.
+      // It seems that the time is a little wasteful, but it is good because it is about 0.1 seconds.
+      if (!skipCorruptCheck && eval_sum != Eval::calc_check_sum())
+          sync_cout << "Error! : EVAL memory is corrupted" << sync_endl;
   }
-
-  // isreadyに対してはreadyokを返すまで次のコマンドが来ないことは約束されているので
-  // このタイミングで各種変数の初期化もしておく。
-
-  TT.resize(Options["Hash"]);
-  Search::clear();
-  Time.availableNodes = 0;
-
-  Threads.stop = false;
-
-  // keep aliveを送信するために生成したスレッドを終了させ、待機する。
-  ended = true;
-  th.join();
 #endif  // defined(EVAL_NNUE)
-
-  sync_cout << "readyok" << sync_endl;
 }
 
 
 // --------------------
-// テスト用にqsearch(),search()を直接呼ぶ
+// Call qsearch(),search() directly for testing
 // --------------------
 
 #if defined(EVAL_LEARN)
@@ -376,8 +373,14 @@ void UCI::loop(int argc, char* argv[]) {
       else if (token == "setoption")  setoption(is);
       else if (token == "go")         go(pos, is, states);
       else if (token == "position")   position(pos, is, states);
-      else if (token == "ucinewgame") Search::clear();
-      else if (token == "isready")    is_ready();
+      else if (token == "ucinewgame")
+      {
+#if defined(EVAL_NNUE)
+          init_nnue();
+#endif
+          Search::clear();
+      }
+      else if (token == "isready")    sync_cout << "readyok" << sync_endl;
 
       // Additional custom non-UCI commands, mainly for debugging.
       // Do not use these commands during a search!
@@ -391,10 +394,10 @@ void UCI::loop(int argc, char* argv[]) {
       else if (token == "learn") Learner::learn(pos, is);
 
 #if defined (GENSFEN2019)
-      // 開発中の教師局面生成コマンド
+	  // Command to generate teacher phase under development
       else if (token == "gensfen2019") Learner::gen_sfen2019(pos, is);
 #endif
-      // テスト用にqsearch(),search()を直接呼ぶコマンド
+      // Command to call qsearch(),search() directly for testing
       else if (token == "qsearch") qsearch_cmd(pos);
       else if (token == "search") search_cmd(pos, is);
 
@@ -405,7 +408,7 @@ void UCI::loop(int argc, char* argv[]) {
 #endif
 
 #if defined(EVAL_NNUE) && defined(ENABLE_TEST_CMD)
-      // テストコマンド
+      // test command
       else if (token == "test") test_cmd(pos, is);
 #endif
       else
@@ -432,6 +435,22 @@ string UCI::value(Value v) {
       ss << "cp " << v * 100 / PawnValueEg;
   else
       ss << "mate " << (v > 0 ? VALUE_MATE - v + 1 : -VALUE_MATE - v) / 2;
+
+  return ss.str();
+}
+
+
+/// UCI::wdl() report WDL statistics given an evaluation and a game ply, based on
+/// data gathered for fishtest LTC games.
+
+string UCI::wdl(Value v, int ply) {
+
+  stringstream ss;
+
+  int wdl_w = win_rate_model( v, ply);
+  int wdl_l = win_rate_model(-v, ply);
+  int wdl_d = 1000 - wdl_w - wdl_l;
+  ss << " wdl " << wdl_w << " " << wdl_d << " " << wdl_l;
 
   return ss.str();
 }

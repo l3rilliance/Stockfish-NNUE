@@ -1,4 +1,4 @@
-﻿// NNUE評価関数の入力特徴量Pの定義
+﻿//Definition of input feature P of NNUE evaluation function
 
 #ifndef _NNUE_FEATURES_P_H_
 #define _NNUE_FEATURES_P_H_
@@ -9,39 +9,39 @@
 #include "features_common.h"
 
 namespace Eval {
-  namespace NNUE {
-    namespace Features {
 
-      // 特徴量P：玉以外の駒のBonaPiece
-      class P {
-      public:
-        // 特徴量名
-        static constexpr const char* kName = "P";
+namespace NNUE {
 
-        // 評価関数ファイルに埋め込むハッシュ値
-        static constexpr std::uint32_t kHashValue = 0x764CFB4Bu;
+namespace Features {
 
-        // 特徴量の次元数
-        static constexpr IndexType kDimensions = fe_end;
+// Feature P: BonaPiece of pieces other than balls
+class P {
+ public:
+  // feature quantity name
+  static constexpr const char* kName = "P";
+  // Hash value embedded in the evaluation function file
+  static constexpr std::uint32_t kHashValue = 0x764CFB4Bu;
+  // number of feature dimensions
+  static constexpr IndexType kDimensions = fe_end;
+  // The maximum value of the number of indexes whose value is 1 at the same time among the feature values
+  static constexpr IndexType kMaxActiveDimensions = PIECE_NUMBER_KING;
+  // Timing of full calculation instead of difference calculation
+  static constexpr TriggerEvent kRefreshTrigger = TriggerEvent::kNone;
 
-        // 特徴量のうち、同時に値が1となるインデックスの数の最大値
-        static constexpr IndexType kMaxActiveDimensions = PIECE_NUMBER_KING;
+  // Get a list of indices with a value of 1 among the features
+  static void AppendActiveIndices(const Position& pos, Color perspective,
+                                  IndexList* active);
 
-        // 差分計算の代わりに全計算を行うタイミング
-        static constexpr TriggerEvent kRefreshTrigger = TriggerEvent::kNone;
+  // Get a list of indices whose values ​​have changed from the previous one in the feature quantity
+  static void AppendChangedIndices(const Position& pos, Color perspective,
+                                   IndexList* removed, IndexList* added);
+};
 
-        // 特徴量のうち、値が1であるインデックスのリストを取得する
-        static void AppendActiveIndices(const Position& pos, Color perspective,
-                                        IndexList* active);
+}  // namespace Features
 
-        // 特徴量のうち、一手前から値が変化したインデックスのリストを取得する
-        static void AppendChangedIndices(const Position& pos, Color perspective,
-                                         IndexList* removed, IndexList* added);
-      };
+}  // namespace NNUE
 
-    } // namespace Features
-  } // namespace NNUE
-} // namespace Eval
+}  // namespace Eval
 
 #endif  // defined(EVAL_NNUE)
 

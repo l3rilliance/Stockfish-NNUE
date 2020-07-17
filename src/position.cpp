@@ -64,10 +64,11 @@ std::ostream& operator<<(std::ostream& os, const Position& pos) {
       for (File f = FILE_A; f <= FILE_H; ++f)
           os << " | " << PieceToChar[pos.piece_on(make_square(f, r))];
 
-      os << " |\n +---+---+---+---+---+---+---+---+\n";
+      os << " | " << (1 + r) << "\n +---+---+---+---+---+---+---+---+\n";
   }
 
-  os << "\nFen: " << pos.fen() << "\nKey: " << std::hex << std::uppercase
+  os << "   a   b   c   d   e   f   g   h\n"
+     << "\nFen: " << pos.fen() << "\nKey: " << std::hex << std::uppercase
      << std::setfill('0') << std::setw(16) << pos.key()
      << std::setfill(' ') << std::dec << "\nCheckers: ";
 
@@ -104,8 +105,7 @@ Key cuckoo[8192];
 Move cuckooMove[8192];
 
 
-/// Position::init() initializes at startup the various arrays used to compute
-/// hash keys.
+/// Position::init() initializes at startup the various arrays used to compute hash keys
 
 void Position::init() {
 
@@ -119,15 +119,7 @@ void Position::init() {
       Zobrist::enpassant[f] = rng.rand<Key>();
 
   for (int cr = NO_CASTLING; cr <= ANY_CASTLING; ++cr)
-  {
-      Zobrist::castling[cr] = 0;
-      Bitboard b = cr;
-      while (b)
-      {
-          Key k = Zobrist::castling[1ULL << pop_lsb(&b)];
-          Zobrist::castling[cr] ^= k ? k : rng.rand<Key>();
-      }
-  }
+      Zobrist::castling[cr] = rng.rand<Key>();
 
   Zobrist::side = rng.rand<Key>();
   Zobrist::noPawns = rng.rand<Key>();
@@ -186,9 +178,9 @@ Position& Position::set(const string& fenStr, bool isChess960, StateInfo* si, Th
 
    4) En passant target square (in algebraic notation). If there's no en passant
       target square, this is "-". If a pawn has just made a 2-square move, this
-      is the position "behind" the pawn. This is recorded only if there is a pawn
-      in position to make an en passant capture, and if there really is a pawn
-      that might have advanced two squares.
+      is the position "behind" the pawn. Following X-FEN standard, this is recorded only
+      if there is a pawn in position to make an en passant capture, and if there really
+      is a pawn that might have advanced two squares.
 
    5) Halfmove clock. This is the number of halfmoves since the last pawn advance
       or capture. This is used to determine if a draw can be claimed under the
@@ -209,11 +201,11 @@ Position& Position::set(const string& fenStr, bool isChess960, StateInfo* si, Th
   st = si;
 
 #if defined(EVAL_NNUE)
-  // evalListのclear。上でmemsetでゼロクリアしたときにクリアされているが…。
+  // clear evalList. It is cleared when memset is cleared to zero above...
   evalList.clear();
 
-  // PieceListを更新する上で、どの駒がどこにあるかを設定しなければならないが、
-  // それぞれの駒をどこまで使ったかのカウンター
+  // In updating the PieceList, we have to set which piece is where,
+  // A counter of how much each piece has been used
   PieceNumber next_piece_number = PIECE_NUMBER_ZERO;
 #endif  // defined(EVAL_NNUE)
 
@@ -235,10 +227,10 @@ Position& Position::set(const string& fenStr, bool isChess960, StateInfo* si, Th
 
 #if defined(EVAL_NNUE)
           PieceNumber piece_no =
-            (idx == W_KING) ? PIECE_NUMBER_WKING : // 先手玉
-            (idx == B_KING) ? PIECE_NUMBER_BKING : // 後手玉
-            next_piece_number++; // それ以外
-          evalList.put_piece(piece_no, sq, pc); // sqの升にpcの駒を配置する
+            (idx == W_KING) ?PIECE_NUMBER_WKING : //
+            (idx == B_KING) ?PIECE_NUMBER_BKING : // back ball
+            next_piece_number++; // otherwise
+          evalList.put_piece(piece_no, sq, pc); // Place the pc piece in the sq box
 #endif  // defined(EVAL_NNUE)
 
           ++sq;
@@ -278,17 +270,25 @@ Position& Position::set(const string& fenStr, bool isChess960, StateInfo* si, Th
       set_castling_right(c, rsq);
   }
 
-  // 4. En passant square. Ignore if no pawn capture is possible
+  // 4. En passant square.
+  // Ignore if square is invalid or not on side to move relative rank 6.
+  bool enpassant = false;
+
   if (   ((ss >> col) && (col >= 'a' && col <= 'h'))
-      && ((ss >> row) && (row == '3' || row == '6')))
+      && ((ss >> row) && (row == (sideToMove == WHITE ? '6' : '3'))))
   {
       st->epSquare = make_square(File(col - 'a'), Rank(row - '1'));
 
-      if (   !(attackers_to(st->epSquare) & pieces(sideToMove, PAWN))
-          || !(pieces(~sideToMove, PAWN) & (st->epSquare + pawn_push(~sideToMove))))
-          st->epSquare = SQ_NONE;
+      // En passant square will be considered only if
+      // a) side to move have a pawn threatening epSquare
+      // b) there is an enemy pawn in front of epSquare
+      // c) there is no piece on epSquare or behind epSquare
+      enpassant = pawn_attacks_bb(~sideToMove, st->epSquare) & pieces(sideToMove, PAWN)
+               && (pieces(~sideToMove, PAWN) & (st->epSquare + pawn_push(~sideToMove)))
+               && !(pieces() & (st->epSquare | (st->epSquare + pawn_push(sideToMove))));
   }
-  else
+
+  if (!enpassant)
       st->epSquare = SQ_NONE;
 
   // 5-6. Halfmove clock and fullmove number
@@ -715,17 +715,9 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
   Key k = st->key ^ Zobrist::side;
 
   // Copy some fields of the old state to our new StateInfo object except the
-  // ones which are going to be recalculated from scratch anyways, and then switch
-  // our state pointer to the new (ready to be updated) state.
-  newSt.pawnKey = st->pawnKey;
-  newSt.materialKey = st->materialKey;
-  newSt.nonPawnMaterial[WHITE] = st->nonPawnMaterial[WHITE];
-  newSt.nonPawnMaterial[BLACK] = st->nonPawnMaterial[BLACK];
-  newSt.castlingRights = st->castlingRights;
-  newSt.rule50 = st->rule50;
-  newSt.pliesFromNull = st->pliesFromNull;
-  newSt.epSquare = st->epSquare;
-
+  // ones which are going to be recalculated from scratch anyway and then switch
+  // our state pointer to point to the new (ready to be updated) state.
+  std::memcpy(&newSt, st, offsetof(StateInfo, key));
   newSt.previous = st;
   st = &newSt;
 
@@ -831,7 +823,7 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
       st->rule50 = 0;
 
 #if defined(EVAL_NNUE)
-      dp.dirty_num = 2; // 動いた駒は2個
+      dp.dirty_num = 2; // 2 pieces moved
 
       dp.pieceNo[1] = piece_no1;
       dp.changed_piece[1].old_piece = evalList.bona_piece(piece_no1);
@@ -859,9 +851,9 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
   // Update castling rights if needed
   if (st->castlingRights && (castlingRightsMask[from] | castlingRightsMask[to]))
   {
-      int cr = castlingRightsMask[from] | castlingRightsMask[to];
-      k ^= Zobrist::castling[st->castlingRights & cr];
-      st->castlingRights &= ~cr;
+      k ^= Zobrist::castling[st->castlingRights];
+      st->castlingRights &= ~(castlingRightsMask[from] | castlingRightsMask[to]);
+      k ^= Zobrist::castling[st->castlingRights];
   }
 
   // Move the piece. The tricky Chess960 castling is handled earlier
@@ -1062,8 +1054,8 @@ template<bool Do>
 void Position::do_castling(Color us, Square from, Square& to, Square& rfrom, Square& rto) {
 #if defined(EVAL_NNUE)
   auto& dp = st->dirtyPiece;
-  // 差分計算のために移動した駒をStateInfoに記録しておく。
-  dp.dirty_num = 2; // 動いた駒は2個
+   // Record the moved pieces in StateInfo for difference calculation.
+   dp.dirty_num = 2; // 2 pieces moved
 
   PieceNumber piece_no0;
   PieceNumber piece_no1;
@@ -1284,6 +1276,7 @@ bool Position::see_ge(Move m, Value threshold) const {
 
   return bool(res);
 }
+
 
 /// Position::is_draw() tests whether the position is drawn by 50-move rule
 /// or by repetition. It does not detect stalemates.

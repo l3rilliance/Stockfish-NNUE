@@ -1,4 +1,4 @@
-﻿// NNUE評価関数の入力特徴量の共通ヘッダ
+﻿//Common header of input features of NNUE evaluation function
 
 #ifndef _NNUE_FEATURES_COMMON_H_
 #define _NNUE_FEATURES_COMMON_H_
@@ -9,35 +9,39 @@
 #include "../nnue_common.h"
 
 namespace Eval {
-  namespace NNUE {
-    namespace Features {
 
-      // インデックスリストの型
-      class IndexList;
+namespace NNUE {
 
-      // 特徴量セットを表すクラステンプレート
-      template <typename... FeatureTypes>
-      class FeatureSet;
+namespace Features {
 
-      // 差分計算の代わりに全計算を行うタイミングの種類
-      enum class TriggerEvent {
-        kNone,             // 可能な場合は常に差分計算する
-        kFriendKingMoved,  // 自玉が移動した場合に全計算する
-        kEnemyKingMoved,   // 敵玉が移動した場合に全計算する
-        kAnyKingMoved,     // どちらかの玉が移動した場合に全計算する
-        kAnyPieceMoved,    // 常に全計算する
-      };
+// Index list type
+class IndexList;
 
-      // 手番側or相手側
-      enum class Side {
-        kFriend,  // 手番側
-        kEnemy,   // 相手側
-      };
+// Class template that represents the feature set
+template <typename... FeatureTypes>
+class FeatureSet;
 
-    } // namespace Features
-  } // namespace NNUE
-} // namespace Eval
+// Type of timing to perform all calculations instead of difference calculation
+enum class TriggerEvent {
+  kNone, // Calculate the difference whenever possible
+  kFriendKingMoved, // calculate all when own ball moves
+  kEnemyKingMoved, // do all calculations when enemy balls move
+  kAnyKingMoved, // do all calculations if either ball moves
+  kAnyPieceMoved, // always do all calculations
+};
 
-#endif // defined(EVAL_NNUE)
+// turn side or other side
+enum class Side {
+  kFriend, // turn side
+  kEnemy, // opponent
+};
+
+}  // namespace Features
+
+}  // namespace NNUE
+
+}  // namespace Eval
+
+#endif  // defined(EVAL_NNUE)
 
 #endif

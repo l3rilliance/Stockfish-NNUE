@@ -192,7 +192,7 @@ enum Value : int {
 
   MidgameLimit  = 15258, EndgameLimit  = 3915,
 
-  // 評価関数の返す値の最大値(2**14ぐらいに収まっていて欲しいところだが..)
+// Maximum value returned by the evaluation function (I want it to be around 2**14..)
   VALUE_MAX_EVAL = 27000,
 };
 
@@ -219,7 +219,6 @@ constexpr Value PieceValue[PHASE_NB][PIECE_NB] = {
 typedef int Depth;
 
 enum : int {
-
   DEPTH_QS_CHECKS     =  0,
   DEPTH_QS_NO_CHECKS  = -1,
   DEPTH_QS_RECAPTURES = -5,
@@ -240,7 +239,7 @@ enum Square : int {
   SQ_NONE,
 
   SQUARE_ZERO = 0, SQUARE_NB = 64,
-  SQUARE_NB_PLUS1 = SQUARE_NB + 1, // 玉がいない場合、SQUARE_NBに移動したものとして扱うため、配列をSQUARE_NB+1で確保しないといけないときがあるのでこの定数を用いる。
+  SQUARE_NB_PLUS1 = SQUARE_NB + 1, // If there are no balls, it is treated as having moved to SQUARE_NB, so it may be necessary to secure the array with SQUARE_NB+1, so this constant is used.
 };
 
 enum Direction : int {
@@ -288,11 +287,11 @@ inline Value mg_value(Score s) {
 }
 
 #define ENABLE_BASE_OPERATORS_ON(T)                                \
-constexpr T operator+(T d1, T d2) { return T(int(d1) + int(d2)); } \
-constexpr T operator-(T d1, T d2) { return T(int(d1) - int(d2)); } \
+constexpr T operator+(T d1, int d2) { return T(int(d1) + d2); } \
+constexpr T operator-(T d1, int d2) { return T(int(d1) - d2); } \
 constexpr T operator-(T d) { return T(-int(d)); }                  \
-inline T& operator+=(T& d1, T d2) { return d1 = d1 + d2; }         \
-inline T& operator-=(T& d1, T d2) { return d1 = d1 - d2; }
+inline T& operator+=(T& d1, int d2) { return d1 = d1 + d2; }         \
+inline T& operator-=(T& d1, int d2) { return d1 = d1 - d2; }
 
 #define ENABLE_INCR_OPERATORS_ON(T)                                \
 inline T& operator++(T& d) { return d = T(int(d) + 1); }           \
@@ -321,12 +320,6 @@ ENABLE_BASE_OPERATORS_ON(Score)
 #undef ENABLE_FULL_OPERATORS_ON
 #undef ENABLE_INCR_OPERATORS_ON
 #undef ENABLE_BASE_OPERATORS_ON
-
-/// Additional operators to add integers to a Value
-constexpr Value operator+(Value v, int i) { return Value(int(v) + i); }
-constexpr Value operator-(Value v, int i) { return Value(int(v) - i); }
-inline Value& operator+=(Value& v, int i) { return v = v + i; }
-inline Value& operator-=(Value& v, int i) { return v = v - i; }
 
 /// Additional operators to add a Direction to a Square
 constexpr Square operator+(Square s, Direction d) { return Square(int(s) + int(d)); }
@@ -364,16 +357,16 @@ constexpr Color operator~(Color c) {
   return Color(c ^ BLACK); // Toggle color
 }
 
-constexpr Square flip_rank(Square s) {
+constexpr Square flip_rank(Square s) { // Swap A1 <-> A8
   return Square(s ^ SQ_A8);
 }
 
-constexpr Square flip_file(Square s) {
+constexpr Square flip_file(Square s) { // Swap A1 <-> H1
   return Square(s ^ SQ_H1);
 }
 
 constexpr Piece operator~(Piece pc) {
-  return Piece(pc ^ 8); // Swap color of piece B_KNIGHT -> W_KNIGHT
+  return Piece(pc ^ 8); // Swap color of piece B_KNIGHT <-> W_KNIGHT
 }
 
 constexpr CastlingRights operator&(Color c, CastlingRights cr) {
@@ -470,18 +463,18 @@ constexpr bool is_ok(Move m) {
   return from_sq(m) != to_sq(m); // Catch MOVE_NULL and MOVE_NONE
 }
 
-// 盤面を180°回したときの升目を返す
+// Return squares when turning the board 180°
 constexpr Square Inv(Square sq) { return (Square)((SQUARE_NB - 1) - sq); }
 
-// 盤面をミラーしたときの升目を返す
+// Return squares when mirroring the board
 constexpr Square Mir(Square sq) { return make_square(File(7 - (int)file_of(sq)), rank_of(sq)); }
 
 #if defined(EVAL_NNUE) || defined(EVAL_LEARN)
 // --------------------
-//        駒箱
+// 		piece box
 // --------------------
 
-// Positionクラスで用いる、駒リスト(どの駒がどこにあるのか)を管理するときの番号。
+// A number used to manage the piece list (which piece is where) used in the Position class.
 enum PieceNumber : uint8_t
 {
 	PIECE_NUMBER_PAWN = 0,
@@ -491,7 +484,7 @@ enum PieceNumber : uint8_t
 	PIECE_NUMBER_QUEEN = 28,
 	PIECE_NUMBER_KING = 30,
 	PIECE_NUMBER_WKING = 30,
-	PIECE_NUMBER_BKING = 31, // 先手、後手の玉の番号が必要な場合はこっちを用いる
+	PIECE_NUMBER_BKING = 31, // Use this if you need the numbers of the first and second balls
 	PIECE_NUMBER_ZERO = 0,
 	PIECE_NUMBER_NB = 32,
 };
@@ -504,9 +497,14 @@ inline PieceNumber operator++(PieceNumber& d, int) {
 }
 inline PieceNumber& operator--(PieceNumber& d) { return d = PieceNumber(int8_t(d) - 1); }
 
-// PieceNumberの整合性の検査。assert用。
+// Piece Number integrity check. for assert.
 constexpr bool is_ok(PieceNumber pn) { return pn < PIECE_NUMBER_NB; }
 #endif  // defined(EVAL_NNUE) || defined(EVAL_LEARN)
+
+/// Based on a congruential pseudo random number generator
+constexpr Key make_key(uint64_t seed) {
+  return seed * 6364136223846793005ULL + 1442695040888963407ULL;
+}
 
 #endif // #ifndef TYPES_H_INCLUDED
 
