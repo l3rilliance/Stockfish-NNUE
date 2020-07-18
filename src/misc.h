@@ -158,6 +158,13 @@ extern void sleep(int ms);
 // Returns a string that represents the current time. (Used for log output when learning evaluation function)
 std::string now_string();
 
+// wrapper for end processing on the way
+static void my_exit()
+{
+	sleep(3000); // It is bad to finish before the error message is output, so put wait.
+	exit(EXIT_FAILURE);
+}
+
 // When compiled with gcc/clang such as msys2, Windows Subsystem for Linux,
 // In C++ std::ifstream, ::read() is a wrapper for that because it is not possible to read and write files larger than 2GB in one shot.
 //
@@ -259,6 +266,7 @@ struct Path
 };
 
 extern void* aligned_malloc(size_t size, size_t align);
+static void aligned_free(void* ptr) { _mm_free(ptr); }
 
 // It is ignored when new even though alignas is specified & because it is ignored when the STL container allocates memory,
 // A custom allocator used for that.
@@ -274,6 +282,7 @@ public:
   template <typename U> AlignedAllocator(const AlignedAllocator<U>&) {}
 
   T* allocate(std::size_t n) { return (T*)aligned_malloc(n * sizeof(T), alignof(T)); }
+  void deallocate(T* p, std::size_t n) { aligned_free(p); }
 };
 
 // --------------------

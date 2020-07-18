@@ -33,7 +33,7 @@ std::string trace(const Position& pos);
 
 Value evaluate(const Position& pos);
 
-void evaluate_with_no_return();
+void evaluate_with_no_return(const Position& pos);
 
 Value compute_eval(const Position& pos);
 
@@ -53,10 +53,10 @@ static void print_softname(uint64_t check_sum) {}
 
 
 // A type that represents P(Piece) when calling KKP/KPP in Bonanza.
-// When you ask for ∆í¬∞ KPP, you need a unique number for each box ÔøΩ~ piece type, like the step at 39 points.
+// When you ask for É∞ KPP, you need a unique number for each box Å~ piece type, like the step at 39 points.
 enum BonaPiece : int32_t
 {
-	// Meaning of f = friend (ÔøΩ√†first move). Meaning of e = enemy (ÔøΩ√†rear)
+	// Meaning of f = friend (Å‡first move). Meaning of e = enemy (Å‡rear)
 
 	// Value when uninitialized
 	BONA_PIECE_NOT_INIT = -1,

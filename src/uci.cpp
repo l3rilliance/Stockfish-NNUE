@@ -250,11 +250,14 @@ namespace {
      // Return win rate in per mille (rounded to nearest)
      return int(0.5 + 1000 / (1 + std::exp((a - x) / b)));
   }
+
+// When you calculate check sum, save it and check the consistency later.
+  uint64_t eval_sum;
 } // namespace
 
 // Make is_ready_cmd() callable from outside. (Because I want to call it from the bench command etc.)
 // Note that the phase is not initialized.
-void init_nnue()
+void init_nnue(bool skipCorruptCheck)
 {
 #if defined(EVAL_NNUE)
   // After receiving "isready", modify so that a line feed is sent every 5 seconds until "readyok" is returned. (keep alive processing)
@@ -388,7 +391,6 @@ void UCI::loop(int argc, char* argv[]) {
       else if (token == "bench")    bench(pos, is, states);
       else if (token == "d")        sync_cout << pos << sync_endl;
       else if (token == "eval")     sync_cout << Eval::trace(pos) << sync_endl;
-      else if (token == "compiler") sync_cout << compiler_info() << sync_endl;
 #if defined (EVAL_LEARN)
       else if (token == "gensfen") Learner::gen_sfen(pos, is);
       else if (token == "learn") Learner::learn(pos, is);

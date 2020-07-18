@@ -18,6 +18,17 @@ namespace NNUE {
 constexpr std::uint32_t kHashValue =
     FeatureTransformer::GetHashValue() ^ Network::GetHashValue();
 
+// Deleter for automating release of memory area
+template <typename T>
+struct AlignedDeleter {
+  void operator()(T* ptr) const {
+    ptr->~T();
+    aligned_free(ptr);
+  }
+};
+template <typename T>
+using AlignedPtr = std::unique_ptr<T, AlignedDeleter<T>>;
+
 // Input feature converter
 extern AlignedPtr<FeatureTransformer> feature_transformer;
 

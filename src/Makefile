@@ -82,7 +82,12 @@ endif
 # prefetch = yes/no   --- -DUSE_PREFETCH   --- Use prefetch asm-instruction
 # popcnt = yes/no     --- -DUSE_POPCNT     --- Use popcnt asm-instruction
 # sse = yes/no        --- -msse            --- Use Intel Streaming SIMD Extensions
+# ssse3 = yes/no      --- -mssse3          --- Use Intel Supplemental Streaming SIMD Extensions 3
+# sse41 = yes/no      --- -msse4.1         --- Use Intel Streaming SIMD Extensions 4.1
+# sse42 = yes/no      --- -msse4.2         --- Use Intel Streaming SIMD Extensions 4.2
+# avx2 = yes/no       --- -mavx2           --- Use Intel Advanced Vector Extensions 2
 # pext = yes/no       --- -DUSE_PEXT       --- Use pext x86_64 asm-instruction
+# avx512 = yes/no     --- -mavx512vbmi     --- Use Intel Advanced Vector Extensions 512
 #
 # Note that Makefile is space sensitive, so when adding new architectures
 # or modifying existing flags, you have to make sure there are no extra spaces
@@ -96,8 +101,13 @@ bits = 64
 prefetch = no
 popcnt = no
 sse = no
+sse3 = no
+ssse3 = no
+sse41 = no
+sse42 = no
 avx2 = no
 pext = no
+avx512 = no
 
 ### 2.2 Architecture specific
 ifeq ($(ARCH),general-32)
@@ -127,11 +137,49 @@ ifeq ($(ARCH),x86-64)
 	sse = yes
 endif
 
-ifeq ($(ARCH),x86-64-modern)
+ifeq ($(ARCH),x86-64-sse3)
+	arch = x86_64
+	prefetch = yes
+	sse = yes
+	sse3 = yes
+	ssse3 = yes
+endif
+
+ifeq ($(ARCH),x86-64-sse3-popcnt)
 	arch = x86_64
 	prefetch = yes
 	popcnt = yes
 	sse = yes
+	sse3 = yes
+	ssse3 = yes
+endif
+
+ifeq ($(ARCH),x86-64-ssse3)
+	arch = x86_64
+	prefetch = yes
+	sse = yes
+	sse3 = yes
+	ssse3 = yes
+endif
+
+ifeq ($(ARCH),x86-64-sse41)
+	arch = x86_64
+	prefetch = yes
+	sse = yes
+	sse3 = yes
+	ssse3 = yes
+	sse41 = yes
+endif
+
+ifeq ($(ARCH),x86-64-sse42)
+	arch = x86_64
+	prefetch = yes
+	popcnt = yes
+	sse = yes
+	sse3 = yes
+	ssse3 = yes
+	sse41 = yes
+	sse42 = yes
 endif
 
 ifeq ($(ARCH),x86-64-avx2)
@@ -140,6 +188,10 @@ ifeq ($(ARCH),x86-64-avx2)
 	prefetch = yes
 	popcnt = yes
 	sse = yes
+	sse3 = yes
+	ssse3 = yes
+	sse41 = yes
+	sse42 = yes
 	avx2 = yes
 endif
 
@@ -148,8 +200,27 @@ ifeq ($(ARCH),x86-64-bmi2)
 	prefetch = yes
 	popcnt = yes
 	sse = yes
+	sse3 = yes
+	ssse3 = yes
+	sse41 = yes
+	sse42 = yes
 	avx2 = yes
 	pext = yes
+endif
+
+ifeq ($(ARCH),x86-64-avx512)
+	arch = x86_64
+	bits = 64
+	prefetch = yes
+	popcnt = yes
+	sse = yes
+	sse3 = yes
+	ssse3 = yes
+	sse41 = yes
+	sse42 = yes
+	avx2 = yes
+	pext = yes
+	avx512 = yes
 endif
 
 ifeq ($(ARCH),armv7)
@@ -180,7 +251,7 @@ endif
 ### ==========================================================================
 
 ### 3.1 Selecting compiler (default = gcc)
-CXXFLAGS += -Wall -Wcast-qual -fno-exceptions -std=c++17 $(EXTRACXXFLAGS) $(NNUECXXFLAGS)
+CXXFLAGS += -Wall -Wcast-qual -Wno-unused-function -Wno-unused-parameter -Wno-unused-variable -fno-exceptions -std=c++17 $(EXTRACXXFLAGS) $(NNUECXXFLAGS)
 DEPENDFLAGS += -std=c++17
 LDFLAGS += $(EXTRALDFLAGS)
 
@@ -370,12 +441,11 @@ endif
 
 ### 3.6 popcnt
 ifeq ($(popcnt),yes)
-	ifeq ($(arch),$(filter $(arch),ppc64 armv8-a))
-		CXXFLAGS += -DUSE_POPCNT
-	else ifeq ($(comp),icc)
-		CXXFLAGS += -msse3 -DUSE_POPCNT -DUSE_SSE2
-	else
-		CXXFLAGS += -msse3 -mpopcnt -DUSE_POPCNT -DUSE_SSE2
+	CXXFLAGS += -DUSE_POPCNT
+	ifneq ($(arch),$(filter $(arch),ppc64 armv8-a))
+		ifeq ($(comp),$(filter $(comp),gcc clang mingw msys2))
+			CXXFLAGS += -mpopcnt
+		endif
 	endif
 endif
 
@@ -386,11 +456,43 @@ ifeq ($(avx2),yes)
 	endif
 endif
 
+ifeq ($(avx512),yes)
+	CXXFLAGS += -DUSE_AVX512
+	ifeq ($(comp),$(filter $(comp),gcc clang mingw msys2))
+		CXXFLAGS += -mavx512bw
+	endif
+endif
+
+ifeq ($(sse42),yes)
+	CXXFLAGS += -DUSE_SSE42
+	ifeq ($(comp),$(filter $(comp),gcc clang mingw msys2))
+		CXXFLAGS += -msse4.2
+	endif
+endif
+
 ifeq ($(sse41),yes)
 	CXXFLAGS += -DUSE_SSE41
 	ifeq ($(comp),$(filter $(comp),gcc clang mingw msys2))
 		CXXFLAGS += -msse4.1
 	endif
+endif
+
+ifeq ($(ssse3),yes)
+	CXXFLAGS += -DUSE_SSSE3
+	ifeq ($(comp),$(filter $(comp),gcc clang mingw msys2))
+		CXXFLAGS += -mssse3
+	endif
+endif
+
+ifeq ($(sse3),yes)
+	CXXFLAGS += -DUSE_SSE3
+	ifeq ($(comp),$(filter $(comp),gcc clang mingw msys2))
+		CXXFLAGS += -msse3
+	endif
+endif
+
+ifeq ($(arch),x86_64)
+	CXXFLAGS += -DUSE_SSE2
 endif
 
 ### 3.7 pext
@@ -450,9 +552,13 @@ help:
 	@echo ""
 	@echo "Supported archs:"
 	@echo ""
-	@echo "x86-64-bmi2             > x86 64-bit with pext support (also enables SSE4)"
-	@echo "x86-64-avx2             > x86 64-bit with avx2 support (also enables SSE4)"
-	@echo "x86-64-modern           > x86 64-bit with popcnt support (also enables SSE3)"
+	@echo "x86-64-avx512           > x86 64-bit with avx512 support"
+	@echo "x86-64-bmi2             > x86 64-bit with bmi2 support"
+	@echo "x86-64-avx2             > x86 64-bit with avx2 support"
+	@echo "x86-64-sse42            > x86 64-bit with sse42 support"
+	@echo "x86-64-sse41            > x86 64-bit with sse41 support"
+	@echo "x86-64-ssse3            > x86 64-bit with ssse3 support"
+	@echo "x86-64-sse3             > x86 64-bit with ssse3 support"
 	@echo "x86-64                  > x86 64-bit generic"
 	@echo "x86-32                  > x86 32-bit (also enables SSE)"
 	@echo "x86-32-old              > x86 32-bit fall back for old hardware"
@@ -549,8 +655,13 @@ config-sanity:
 	@echo "prefetch: '$(prefetch)'"
 	@echo "popcnt: '$(popcnt)'"
 	@echo "sse: '$(sse)'"
+	@echo "sse3: '$(sse3)'"
+	@echo "ssse3: '$(ssse3)'"
+	@echo "sse41: '$(sse41)'"
+	@echo "sse42: '$(sse42)'"
 	@echo "avx2: '$(avx2)'"
 	@echo "pext: '$(pext)'"
+	@echo "avx512: '$(avx512)'"
 	@echo ""
 	@echo "Flags:"
 	@echo "CXX: $(CXX)"
@@ -569,7 +680,13 @@ config-sanity:
 	@test "$(prefetch)" = "yes" || test "$(prefetch)" = "no"
 	@test "$(popcnt)" = "yes" || test "$(popcnt)" = "no"
 	@test "$(sse)" = "yes" || test "$(sse)" = "no"
+	@test "$(sse3)" = "yes" || test "$(sse3)" = "no"
+	@test "$(ssse3)" = "yes" || test "$(ssse3)" = "no"
+	@test "$(sse41)" = "yes" || test "$(sse41)" = "no"
+	@test "$(sse42)" = "yes" || test "$(sse42)" = "no"
+	@test "$(avx2)" = "yes" || test "$(avx2)" = "no"
 	@test "$(pext)" = "yes" || test "$(pext)" = "no"
+	@test "$(avx512)" = "yes" || test "$(avx512)" = "no"
 	@test "$(comp)" = "gcc" || test "$(comp)" = "icc" || test "$(comp)" = "mingw" || test "$(comp)" = "clang"
 
 $(EXE): $(OBJS)

@@ -627,7 +627,7 @@ void MultiThinkGenSfen::thread_worker(size_t thread_id)
 						// If the depth is 8 or more, it seems faster not to calculate this difference.
 #if defined(EVAL_NNUE)
             if (depth < 8)
-              Eval::evaluate_with_no_return();
+              Eval::evaluate_with_no_return(pos);
 #endif  // defined(EVAL_NNUE)
 					}
 
@@ -825,7 +825,7 @@ void MultiThinkGenSfen::thread_worker(size_t thread_id)
 			pos.do_move(m, states[ply]);
 
 			// Call node evaluate() for each difference calculation.
-			Eval::evaluate_with_no_return();
+			Eval::evaluate_with_no_return(pos);
 
 		} // for (int ply = 0; ; ++ply)
 
@@ -1697,7 +1697,7 @@ void LearnerThink::calc_loss(size_t thread_id, uint64_t done)
 				for (size_t i = 0; i < pv.size(); ++i)
 				{
 					pos.do_move(pv[i], states[i]);
-					Eval::evaluate_with_no_return();
+					Eval::evaluate_with_no_return(pos);
 				}
 				shallow_value = (rootColor == pos.side_to_move()) ? Eval::evaluate(pos) : -Eval::evaluate(pos);
 				for (auto it = pv.rbegin(); it != pv.rend(); ++it)
@@ -1872,7 +1872,7 @@ void LearnerThink::thread_worker(size_t thread_id)
 				std::cout << sr.total_done << " sfens , at " << now_string() << std::endl;
 
 				// Reflect the gradient in the weight array at this timing. The calculation of the gradient is just right for each 1M phase in terms of mini-batch.
-				Eval::update_weights();
+				Eval::update_weights(epoch , freeze);
 
 				// Display epoch and current eta for debugging.
 				std::cout << "epoch = " << epoch << " , eta = " << Eval::get_eta() << std::endl;
@@ -2073,7 +2073,7 @@ void LearnerThink::thread_worker(size_t thread_id)
 
 			// Since we have reached leaf, add the gradient to the features that appear in this phase.
 			// Update based on gradient later.
-			Eval::add_grad();
+			Eval::add_grad(pos, rootColor, dj_dw, freeze);
 #else
 			const double example_weight =
 			    (discount_rate != 0 && ply != (int)pv.size()) ? discount_rate : 1.0;
@@ -2106,7 +2106,7 @@ void LearnerThink::thread_worker(size_t thread_id)
 			pos.do_move(m, state[ply++]);
 
 			// Since the value of evaluate in leaf is used, the difference is updated.
-			Eval::evaluate_with_no_return();
+			Eval::evaluate_with_no_return(pos);
 		}
 
 		if (illegal_move) {
@@ -2125,7 +2125,7 @@ void LearnerThink::thread_worker(size_t thread_id)
 		// When adding the gradient to the root phase
 		shallow_value = (rootColor == pos.side_to_move()) ? Eval::evaluate(pos) : -Eval::evaluate(pos);
 		dj_dw = calc_grad(deep_value, shallow_value, ps);
-		Eval::add_grad();
+		Eval::add_grad(pos, rootColor, dj_dw , without_kpp);
 #endif
 
 	}
@@ -3089,14 +3089,14 @@ void learn(Position&, istringstream& is)
 	}
 	if (use_convert_plain)
 	{
-		init_nnue();
+		init_nnue(true);
 		cout << "convert_plain.." << endl;
 		convert_plain(filenames, output_file_name);
 		return;
 	}
 	if (use_convert_bin)
 	{
-	  	init_nnue();
+	  	init_nnue(true);
 		cout << "convert_bin.." << endl;
 		convert_bin(filenames,output_file_name, ply_minimum, ply_maximum, interpolate_eval);
 		return;
@@ -3104,7 +3104,7 @@ void learn(Position&, istringstream& is)
 	}
 	if (use_convert_bin_from_pgn_extract)
 	{
-		init_nnue();
+		init_nnue(true);
 		cout << "convert_bin_from_pgn-extract.." << endl;
 		convert_bin_from_pgn_extract(filenames, output_file_name, pgn_eval_side_to_move);
 		return;
@@ -3170,13 +3170,13 @@ void learn(Position&, istringstream& is)
 	cout << "init.." << endl;
 
 	// Read evaluation function parameters
-	init_nnue();
+	init_nnue(true);
 
 #if !defined(EVAL_NNUE)
 	cout << "init_grad.." << endl;
 
 	// Initialize gradient array of merit function parameters
-	Eval::init_grad();
+	Eval::init_grad(eta1,eta1_epoch,eta2,eta2_epoch,eta3);
 #else
 	cout << "init_training.." << endl;
 	Eval::NNUE::InitializeTraining(eta1,eta1_epoch,eta2,eta2_epoch,eta3);
@@ -3192,8 +3192,8 @@ void learn(Position&, istringstream& is)
 	pos.set_hirate();
 	cout << Eval::evaluate(pos) << endl;
 	//Eval::print_eval_stat(pos);
-	Eval::add_grad();
-	Eval::update_weights();
+	Eval::add_grad(pos, BLACK, 32.0 , false);
+	Eval::update_weights(1);
 	pos.state()->sum.p[2][0] = VALUE_NOT_EVALUATED;
 	cout << Eval::evaluate(pos) << endl;
 	//Eval::print_eval_stat(pos);
